@@ -1,7 +1,7 @@
 - id: ai-docfix
   name: AI DocFix
   description: Automatically generate docstrings for undocumented functions
-  entry: python -m ai_docfix.__main__
+  entry: ai-docfix
   language: python
   types: [python]
   require_serial: true
