@@ -1,27 +1,40 @@
 def insert_docstring(original_lines, line_no, docstring):
-    """Insert docstring after the function/class definition."""
-    indent = " " * (len(original_lines[line_no]) - len(original_lines[line_no].lstrip()))
+    """Insert docstring after the function/class definition with proper formatting."""
+    # Get indentation from the function/class definition line
+    def_line = original_lines[line_no]
+    indent = " " * (len(def_line) - len(def_line.lstrip()))
+    
+    # Clean up docstring
+    docstring = docstring.strip()
+    
+    # Remove existing triple quotes if present
+    if docstring.startswith('"""'):
+        docstring = docstring[3:]
+    if docstring.endswith('"""'):
+        docstring = docstring[:-3]
     
     docstring = docstring.strip()
     
-    if docstring.startswith('"""') and docstring.endswith('"""'):
-        docstring = docstring[3:-3].strip()
-    elif docstring.startswith("'''") and docstring.endswith("'''"):
-        docstring = docstring[3:-3].strip()
+    # Split into lines
+    doc_lines = docstring.split("\n")
     
-    docstring_lines = docstring.split("\n")
+    # Format the docstring properly
+    formatted_lines = []
+    formatted_lines.append(f'{indent}"""')
     
-    if len(docstring_lines) == 1:
-        doc_lines = [f'{indent}"""{docstring_lines[0]}"""', ""]
-    else:
-        doc_lines = [f'{indent}"""']
-        for line in docstring_lines:
-            doc_lines.append(f'{indent}{line}')
-        doc_lines.append(f'{indent}"""')
-        doc_lines.append("")
+    for line in doc_lines:
+        # Add indentation to each line
+        if line.strip():  # Non-empty line
+            formatted_lines.append(f'{indent}{line}')
+        else:  # Empty line
+            formatted_lines.append("")
     
+    formatted_lines.append(f'{indent}"""')
+    formatted_lines.append("")  # Blank line after docstring
+    
+    # Insert after the function/class definition
     return (
         original_lines[:line_no + 1] +
-        doc_lines +
+        formatted_lines +
         original_lines[line_no + 1:]
     )
