@@ -4,4 +4,7 @@
   entry: python -m ai_docfix
   language: python
   types: [python]
+  require_serial: true
   stages: [commit]
+  pass_filenames: false
+  additional_dependencies: ['google-generativeai']
