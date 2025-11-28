@@ -1,0 +1,7 @@
+- id: ai-docfix
+  name: AI DocFix
+  description: Automatically generate docstrings for undocumented functions
+  entry: python -m ai_docfix
+  language: python
+  types: [python]
+  stages: [commit]

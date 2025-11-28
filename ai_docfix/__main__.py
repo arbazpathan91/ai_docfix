@@ -1,0 +1,20 @@
+import sys
+import argparse
+from .config import set_api_key
+from .hook import main
+
+def cli():
+    """Command line interface."""
+    parser = argparse.ArgumentParser(description="AI DocFix - Auto-generate docstrings")
+    parser.add_argument('--api-key', type=str, help='Google API Key')
+    parser.add_argument('files', nargs='*', help='Files to process')
+    
+    args = parser.parse_args()
+    
+    if args.api_key:
+        set_api_key(args.api_key)
+    
+    sys.exit(main())
+
+if __name__ == "__main__":
+    cli()
