@@ -1,11 +1,12 @@
 from .config import get_api_key
 import google.generativeai as genai
+from typing import Optional
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-flash-latest"
 
 
 def generate_docstring(function_signature: str,
-                       full_file_context: str = None):
+                       full_file_context: Optional[str] = None) -> str:
     """Generate a concise, complete docstring for the given
     function using Gemini with PEP 8 compliance."""
     api_key = get_api_key()
@@ -19,75 +20,46 @@ def generate_docstring(function_signature: str,
     prompt = f"""You are a Python documentation expert.
 Generate a PEP 257 compliant docstring for a specific function.
 
-FILE CONTEXT (to understand the codebase):
-```python
-{full_file_context}
-```
-
 TARGET FUNCTION TO DOCUMENT:
 The function/class marked between the === markers below is
-the ONLY one you should write a docstring for. Ignore any
-similar functions in the file context above.
+the ONLY one you should write a docstring for.
 
 {function_signature}
 
-Generate ONLY the docstring for the function/class marked
-above between the === markers. Do NOT use docstrings from
-other functions.
+Generate ONLY the docstring for the marked function above.
+Do NOT use docstrings from other functions.
 
-Follow these CRITICAL rules:
+Follow these rules:
 
-1. Use Google-style docstring format
-2. Keep total line length ≤ 72 characters (PEP 8)
-3. Wrap long lines with proper indentation
-4. Write a concise one-line summary (max 72 chars)
-5. Add description only if needed (1-2 sentences, wrapped)
-6. Include Args section with types and descriptions
-7. Include Returns section only if function returns a value
-8. Include Raises section only if function raises exceptions
-9. Do NOT include Returns/Raises for None-returning functions
+1. Google-style docstring format
+2. Line length ≤ 72 characters (PEP 8)
+3. Concise one-line summary
+4. Brief description (1-2 sentences if needed)
+5. Args section with types and descriptions
+6. Returns section only if function returns a value
+7. Raises section only if function raises exceptions
+8. Do NOT include Returns/Raises for None-returning functions
 
-FORMATTING RULES:
-- Each line including indentation must be ≤ 72 characters
-- Break long descriptions across multiple lines
-- Indent continuation lines by 8 spaces total (4 for body + 4)
-- Leave blank line between summary and description
-- Leave blank line between description and Args
-- In Args/Returns: description starts after type on same line
-- If description is long, wrap to next line with 8-space indent
-
-EXAMPLE:
-    Args:
-        param1 (str): Short description.
-        param2 (dict): This is a longer description that
-            wraps to the next line with extra indent.
-    
-    Returns:
-        bool: This is a long return description that
-            wraps properly to the next line.
-
-QUALITY RULES:
+OUTPUT RULES:
 - Output ONLY the docstring content
-- NO triple quotes ("\"\"\)
-- NO code blocks or markdown backticks
-- NO extra formatting or explanation
+- NO triple quotes (\"\"\")
+- NO code blocks or markdown
+- NO extra text or explanation
 - Be specific to THIS function only
-- Use clear, concise language
-- Add type hints: param (type): description
-- If no parameters, omit Args section
-- If returns None, omit Returns section
-- Do NOT duplicate the docstring
-- Ensure consistent indentation throughout
-- For __init__ methods: only include Args for parameters
-  passed to __init__, not attributes set internally
 """
 
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.types.GenerationConfig(
-            temperature=0.3
+    try:
+        response: genai.types.GenerateContentResponse = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.2,
+                max_output_tokens=300
+            )
         )
-    )
+    except Exception as e:
+        raise Exception(
+            f"LLM generation failed: {str(e)}"
+        )
 
     text = response.text.strip()
 

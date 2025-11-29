@@ -1,10 +1,14 @@
 import subprocess
 import sys
 import ast
+import signal
 from .parser import find_doc_issues
 from .llm import generate_docstring
 from .patcher import insert_docstring
 from .validator import validate_line_length, wrap_docstring
+
+# Timeout for each file processing (seconds)
+TIMEOUT_PER_FILE = 30
 
 def get_staged_files():
     """Get staged Python files from git."""
@@ -20,35 +24,34 @@ def get_staged_files():
 
 def extract_function_signature(lines, line_no):
     """Extract function signature with clear markers.
-    
+
     Args:
         lines (list): All file lines.
         line_no (int): The line number of the function.
-    
+
     Returns:
         str: The function signature with markers.
     """
     start = line_no
     sig_lines = [lines[start]]
     i = start + 1
-    
-    # Collect full signature (including decorators above)
-    while i < len(lines) and (
-        lines[i].strip().startswith("->") or 
+
+    # Collect full signature (max 5 lines)
+    while (i < len(lines) and i < start + 5 and (
+        lines[i].strip().startswith("->") or
         lines[i].strip().startswith(")") or
-        "(" in lines[start] and 
+        "(" in lines[start] and
         ")" not in "\n".join(sig_lines)
-    ):
+    )):
         sig_lines.append(lines[i])
         i += 1
-    
-    # Add a few lines of body for context
-    for j in range(i, min(i + 3, len(lines))):
+
+    # Add only 1-2 lines of body for context (not 5)
+    for j in range(i, min(i + 2, len(lines))):
         sig_lines.append(lines[j])
-    
+
     signature = "\n".join(sig_lines)
-    
-    # Add clear markers for the LLM
+
     return (
         "=== FUNCTION/CLASS TO DOCUMENT ===\n" +
         signature +
