@@ -13,22 +13,20 @@ def insert_docstring(original_lines, line_no, docstring):
         list: Modified list with docstring inserted.
     """
     def_line = original_lines[line_no]
-    
-    # Calculate indentation - count spaces before first non-space
+
+    # Calculate indentation
     indent_count = 0
     for char in def_line:
         if char == ' ':
             indent_count += 1
         else:
             break
-    
-    indent = " " * indent_count
+
     body_indent = " " * (indent_count + 4)
 
-    # Clean docstring
+    # Clean docstring - remove triple quotes if present
     docstring = docstring.strip()
 
-    # Remove triple quotes if LLM added them
     if docstring.startswith('"""'):
         docstring = docstring[3:]
     if docstring.endswith('"""'):
@@ -36,19 +34,38 @@ def insert_docstring(original_lines, line_no, docstring):
 
     docstring = docstring.strip()
 
-    # Split into lines and format consistently
+    # Split into lines
     doc_lines = docstring.split("\n")
 
+    # Format with proper indentation
     formatted_lines = []
     formatted_lines.append(f'{body_indent}"""')
 
     for line in doc_lines:
         stripped = line.strip()
-        if stripped:
-            # Remove any leading spaces and re-add consistent indent
+
+        # Preserve structure: Args:, Returns:, etc stay left
+        # but content gets indented
+        if stripped.endswith(':') and stripped in [
+            'Args', 'Returns', 'Raises', 'Yields', 'Note',
+            'Notes', 'Example', 'Examples', 'Attributes'
+        ]:
+            formatted_lines.append(f'{body_indent}{stripped}')
+        elif stripped and not stripped[0].isupper():
+            # Parameter line or description - add extra indent
+            if ':' in stripped:
+                # Parameter with description
+                formatted_lines.append(
+                    f'{body_indent}    {stripped}'
+                )
+            else:
+                # Regular line
+                formatted_lines.append(f'{body_indent}{stripped}')
+        elif stripped:
+            # Regular content line
             formatted_lines.append(f'{body_indent}{stripped}')
         else:
-            # Preserve blank lines
+            # Blank line
             formatted_lines.append("")
 
     formatted_lines.append(f'{body_indent}"""')
