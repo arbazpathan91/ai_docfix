@@ -12,18 +12,20 @@ except ImportError:
 
 from .config import get_model_name, get_api_base, get_generation_config
 
-# Updated Prompt to prevent context leakage
+# =============================================================================
+# STRICT SYSTEM INSTRUCTIONS
+# =============================================================================
 SYSTEM_INSTRUCTION = """
-You are a Senior Python Technical Writer. 
-Your only task is to write Google-style (PEP 257) docstrings for Python code.
+You are a strict Python Documentation Engine.
+Generate a Google-style docstring ONLY for the specific code provided in the <TARGET> tag.
 
-RULES:
-1. Describe *what* the code does and *why*, not *how*.
-2. Use sections: Args, Returns, Raises (if applicable).
-3. Do NOT output markdown ticks (```).
-4. Do NOT output the enclosing triple quotes. Return ONLY the docstring text.
-5. If arguments or returns are None, omit those sections.
-6. FOCUS: Document ONLY the specific function/class signature provided in the 'TARGET CODE' block. Do NOT document subsequent functions or classes found in the file context.
+CRITICAL RULES:
+1. **Scope**: Document ONLY the function/class signature found inside <TARGET>. Ignore any other code in <CONTEXT>.
+2. **Stop**: Do NOT describe subsequent functions, methods, or classes. One docstring per request.
+3. **Self**: Do NOT document the 'self' or 'cls' arguments.
+4. **Classes**: Use 'Attributes' for class variables. Do NOT use 'Args' in class docstrings (put those in __init__).
+5. **Format**: Return raw docstring text only. No markdown formatting (no ```python).
+6. **Brevity**: Be concise. Describe WHAT and WHY, not HOW.
 """
 
 def _get_vertex_safety_settings() -> List[Dict[str, str]]:
@@ -57,23 +59,23 @@ def generate_docstring(function_signature: str,
     if "vertex_ai" in model_name or "gemini" in model_name:
         api_base = None
 
-    context_str = f"CONTEXT FILE:\n{full_file_context}\n\n" if full_file_context else ""
-    
-    user_prompt = f"""{context_str}
-EXAMPLE INPUT:
-def add(a, b): return a + b
-EXAMPLE OUTPUT:
-Add two numbers.
+    # We wrap the context in XML tags to help the LLM distinguish boundaries
+    context_block = ""
+    if full_file_context:
+        context_block = f"""
+<CONTEXT_FILE>
+(Use this ONLY for type reference. DO NOT document this code.)
+{full_file_context}
+</CONTEXT_FILE>
+"""
 
-Args:
-    a (int): First number.
-    b (int): Second number.
+    user_prompt = f"""{context_block}
 
-Returns:
-    int: The sum.
-
-TARGET CODE TO DOCUMENT (Focus only on this):
+<TARGET_TO_DOCUMENT>
 {function_signature}
+</TARGET_TO_DOCUMENT>
+
+Generate the docstring for the code inside <TARGET_TO_DOCUMENT> only.
 """
     
     messages = [
@@ -86,12 +88,12 @@ TARGET CODE TO DOCUMENT (Focus only on this):
         "messages": messages,
         "temperature": gen_config["temperature"],
         "max_tokens": gen_config["max_tokens"],
-        "stop": ['"""'],
+        "stop": ['"""', "<TARGET>", "</TARGET>"], # Extra stop tokens
         "drop_params": True,
     }
 
     if api_base: kwargs["api_base"] = api_base
-    if "vertex" in model_name or "gemini" in model_name:
+    if "vertex_ai" in model_name or "gemini" in model_name:
         kwargs["safety_settings"] = _get_vertex_safety_settings()
 
     try:
