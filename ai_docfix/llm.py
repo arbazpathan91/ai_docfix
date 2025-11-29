@@ -1,10 +1,11 @@
 from .config import get_api_key
 import google.generativeai as genai
+from typing import Optional
 
 MODEL_NAME = "gemini-2.0-flash"
 
-def generate_docstring(code_snippet: str, full_file_context: str = None):
-    """Generate a concise, complete docstring for the given code snippet using Gemini."""
+def generate_docstring(function_signature: str, full_file_context: Optional[str] = None) -> str:
+    """Generate a concise, complete docstring for the given function using Gemini."""
     api_key = get_api_key()
     if not api_key:
         raise Exception("GOOGLE_API_KEY not set")
@@ -13,59 +14,40 @@ def generate_docstring(code_snippet: str, full_file_context: str = None):
     model = genai.GenerativeModel(MODEL_NAME)
     
     # Build context-aware prompt
-    if full_file_context:
-        prompt = f"""You are a Python documentation expert. Analyze the entire file context first to understand the module's purpose and patterns, then generate a concise but complete docstring for the function/class.
+    prompt = f"""
+You are a Python documentation expert. Your task is to generate a docstring for a specific function.
 
-FILE CONTEXT:
+FILE CONTEXT (to understand the codebase):
 ```python
 {full_file_context}
 ```
 
-TARGET CODE:
+TARGET FUNCTION:
 ```python
-{code_snippet}
+{function_signature}
 ```
 
-Generate a concise docstring that includes:
-- Brief one-line summary
-- Longer description if needed (2-3 sentences max)
-- Args section with types and descriptions
-- Returns section with type and description
-- Raises section if applicable
+Generate ONLY the docstring for this specific function. Follow these rules:
 
-Requirements:
-- Be concise but complete
-- Use proper Python docstring format (Google style)
-- Only output the docstring text, NO triple quotes
-- NO code blocks, NO markdown, NO backticks
-- Match the file's patterns and conventions
-- Output ONLY the docstring content, nothing else
-- Follow pep-8 guidelines
-- Ensure line length does not exceed 72 characters
-"""
-    else:
-        prompt = f"""Generate a concise but complete Python docstring for this function/class.
+1. Write a concise one-line summary
+2. Add a longer description if needed (max 2-3 sentences)
+3. Include Args section with parameter names, types, and descriptions
+4. Include Returns section with type and description
+5. Include Raises section only if the function raises exceptions
+6. Use Google-style docstring format
 
-CODE:
-```python
-{code_snippet}
-```
-
-Generate a docstring that includes:
-- Brief one-line summary
-- Longer description if needed (2-3 sentences max)
-- Args section with types and descriptions
-- Returns section with type and description
-- Raises section if applicable
-
-Requirements:
-- Be concise but complete
-- Use proper Python docstring format (Google style)
-- Only output the docstring text, no triple quotes
-- No code blocks or markdown
+CRITICAL RULES:
+- Output ONLY the docstring content
+- NO triple quotes (\"\"\")
+- NO code blocks or markdown backticks
+- NO extra formatting or explanation
+- Be specific to THIS function, not similar functions
+- Keep it concise but complete
+- If a function has no parameters, do NOT include an Args section
+- If a function doesn't return anything, do NOT include a Returns section
 """
     
-    response = model.generate_content(
+    response: genai.types.GenerateContentResponse = model.generate_content(
         prompt,
         generation_config=genai.types.GenerationConfig(temperature=0.3)
     )

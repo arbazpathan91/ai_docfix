@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import ast
 from .parser import find_doc_issues
 from .llm import generate_docstring
 from .patcher import insert_docstring
@@ -15,6 +16,30 @@ def get_staged_files():
         return [f for f in output.split("\n") if f.endswith(".py")]
     except subprocess.CalledProcessError:
         return []
+
+def extract_function_signature(lines, line_no):
+    """Extract just the function/class definition and a few lines of body."""
+    # Find the start of the def/class line
+    start = line_no
+    
+    # Collect the definition line(s) - might span multiple lines
+    sig_lines = [lines[start]]
+    i = start + 1
+    
+    # For multi-line signatures (with \ or unclosed parens), keep collecting
+    while i < len(lines) and (
+        lines[i].strip().startswith("->") or 
+        lines[i].strip().startswith(")") or
+        "(" in lines[start] and ")" not in "\n".join(sig_lines)
+    ):
+        sig_lines.append(lines[i])
+        i += 1
+    
+    # Add a few lines of body for context
+    for j in range(i, min(i + 5, len(lines))):
+        sig_lines.append(lines[j])
+    
+    return "\n".join(sig_lines)
 
 def process_file(path):
     """Process a single file to add missing docstrings."""
@@ -36,13 +61,14 @@ def process_file(path):
     
     for issue in issues:
         try:
-            # Get snippet for context
-            snippet_start = max(0, issue.start_line - 1)
-            snippet_end = min(len(lines), issue.start_line + 10)
-            snippet = "\n".join(lines[snippet_start:snippet_end])
+            # Extract just the function signature and its name
+            func_signature = extract_function_signature(lines, issue.start_line - 1)
             
-            # Generate docstring with full file context
-            doc = generate_docstring(snippet, full_file_context=original)
+            # Generate docstring with full file context and specific function signature
+            doc = generate_docstring(
+                function_signature=func_signature,
+                full_file_context=original
+            )
             
             # Insert docstring
             insert_at = issue.start_line - 1
