@@ -13,19 +13,20 @@ except ImportError:
 from .config import get_model_name, get_api_base, get_generation_config
 
 # =============================================================================
-# STRICT SYSTEM INSTRUCTIONS
+# REFINED SYSTEM INSTRUCTIONS
 # =============================================================================
 SYSTEM_INSTRUCTION = """
-You are a strict Python Documentation Engine.
-Generate a Google-style docstring ONLY for the specific code provided in the <TARGET> tag.
+You are a Senior Python Technical Writer. 
+Your only task is to write Google-style (PEP 257) docstrings for Python code.
 
-CRITICAL RULES:
-1. **Scope**: Document ONLY the function/class signature found inside <TARGET>. Ignore any other code in <CONTEXT>.
-2. **Stop**: Do NOT describe subsequent functions, methods, or classes. One docstring per request.
-3. **Self**: Do NOT document the 'self' or 'cls' arguments.
-4. **Classes**: Use 'Attributes' for class variables. Do NOT use 'Args' in class docstrings (put those in __init__).
-5. **Format**: Return raw docstring text only. No markdown formatting (no ```python).
-6. **Brevity**: Be concise. Describe WHAT and WHY, not HOW.
+RULES:
+1. **Completeness**: Write full, grammatical sentences. Do not leave sentences unfinished.
+2. **Structure**: 
+   - Use `Args`, `Returns`, `Raises` for functions.
+   - Use `Attributes` for Classes (do NOT use `Args` in class docstrings).
+3. **Format**: Return ONLY the docstring text. No markdown (```), no enclosing triple quotes.
+4. **Focus**: Document ONLY the code provided in <TARGET_TO_DOCUMENT>. Do not hallucinate or document subsequent code.
+5. **Self**: Do NOT document the 'self' argument.
 """
 
 def _get_vertex_safety_settings() -> List[Dict[str, str]]:
@@ -45,8 +46,14 @@ def _sanitize_output(text: str) -> Optional[str]:
         if line.strip().startswith("```"): continue
         if line.strip() in ['"""', "'''"]: continue
         clean_lines.append(line)
+    
+    # Ensure the last line is not just a trailing quote
+    if clean_lines and clean_lines[-1].strip() in ['"""', "'''"]:
+        clean_lines.pop()
+
     while clean_lines and not clean_lines[0].strip(): clean_lines.pop(0)
     while clean_lines and not clean_lines[-1].strip(): clean_lines.pop()
+    
     return "\n".join(clean_lines)
 
 def generate_docstring(function_signature: str,
@@ -59,23 +66,26 @@ def generate_docstring(function_signature: str,
     if "vertex_ai" in model_name or "gemini" in model_name:
         api_base = None
 
-    # We wrap the context in XML tags to help the LLM distinguish boundaries
-    context_block = ""
-    if full_file_context:
-        context_block = f"""
-<CONTEXT_FILE>
-(Use this ONLY for type reference. DO NOT document this code.)
-{full_file_context}
-</CONTEXT_FILE>
-"""
+    context_str = f"CONTEXT FILE:\n{full_file_context}\n\n" if full_file_context else ""
+    
+    user_prompt = f"""{context_str}
+EXAMPLE FUNCTION:
+def add(a, b): return a + b
+DOCSTRING:
+Add two numbers.
 
-    user_prompt = f"""{context_block}
+Args:
+    a (int): First number.
+    b (int): Second number.
+
+Returns:
+    int: The sum.
 
 <TARGET_TO_DOCUMENT>
 {function_signature}
 </TARGET_TO_DOCUMENT>
 
-Generate the docstring for the code inside <TARGET_TO_DOCUMENT> only.
+Generate the docstring for the code inside <TARGET_TO_DOCUMENT>.
 """
     
     messages = [
@@ -87,8 +97,9 @@ Generate the docstring for the code inside <TARGET_TO_DOCUMENT> only.
         "model": model_name,
         "messages": messages,
         "temperature": gen_config["temperature"],
-        "max_tokens": gen_config["max_tokens"],
-        "stop": ['"""', "<TARGET>", "</TARGET>"], # Extra stop tokens
+        # Increase tokens slightly to prevent mid-sentence cutoff
+        "max_tokens": 1024, 
+        "stop": ['"""', "<TARGET>"], 
         "drop_params": True,
     }
 
