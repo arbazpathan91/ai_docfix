@@ -65,6 +65,10 @@ QUALITY RULES:
 - Add type hints: param (type): description
 - If no parameters, omit Args section
 - If returns None, omit Returns section
+- Do NOT duplicate the docstring
+- Ensure consistent indentation throughout
+- For __init__ methods: only include Args for parameters
+  passed to __init__, not attributes set internally
 """
 
     response: genai.types.GenerateContentResponse = model.generate_content(
