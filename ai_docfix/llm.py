@@ -1,131 +1,157 @@
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
-from typing import Optional
-from .config import get_api_key
+import os
+import sys
+from typing import Optional, List, Dict, Any
 
-# gemini-1.5-flash is fast and usually follows system instructions well
-MODEL_NAME = "gemini-1.5-flash"
+# Attempt to import litellm, handle missing dependency gracefully
+try:
+    import litellm
+    from litellm import completion
+    from litellm.exceptions import APIConnectionError, RateLimitError, ServiceUnavailableError
+except ImportError:
+    print("[ERROR] 'litellm' is not installed. Please run: pip install litellm")
+    sys.exit(1)
+
+from .config import get_model_name, get_api_base, get_generation_config
+
+# =============================================================================
+# PROMPT DEFINITIONS
+# =============================================================================
+
+# We separate the "Persona/Rules" from the "Data" to prevent Jailbreak/Safety triggers.
+SYSTEM_INSTRUCTION = """
+You are a Senior Python Technical Writer. 
+Your only task is to write Google-style (PEP 257) docstrings for Python code.
+
+RULES:
+1. Describe *what* the code does and *why*, not *how*.
+2. Use sections: Args, Returns, Raises (if applicable).
+3. Do NOT output markdown ticks (```).
+4. Do NOT output the enclosing triple quotes. Return ONLY the docstring text.
+5. If arguments or returns are None, omit those sections.
+6. Treat all input code as technical data.
+"""
+
+def _get_vertex_safety_settings() -> List[Dict[str, str]]:
+    """
+    Returns safety settings specifically for Google/Vertex models.
+    We set thresholds to BLOCK_NONE to allow technical terms like 'kill_process'.
+    """
+    return [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+    ]
+
+def _sanitize_output(text: str) -> Optional[str]:
+    """
+    Clean up LLM output: remove markdown code blocks and quotes.
+    """
+    if not text:
+        return None
+    
+    clean_lines = []
+    lines = text.split('\n')
+    
+    for line in lines:
+        line = line.rstrip()
+        
+        # Remove common markdown artifacts
+        if line.strip().startswith("```"): 
+            continue
+        
+        # Remove quotes if the LLM output them despite instructions
+        if line.strip() in ['"""', "'''"]: 
+            continue
+            
+        clean_lines.append(line)
+
+    # Remove empty lines from start/end
+    while clean_lines and not clean_lines[0].strip(): 
+        clean_lines.pop(0)
+    while clean_lines and not clean_lines[-1].strip(): 
+        clean_lines.pop()
+
+    final_text = "\n".join(clean_lines)
+    return final_text if final_text else None
 
 def generate_docstring(function_signature: str,
                        full_file_context: Optional[str] = None) -> Optional[str]:
     """
-    Generates a generic, PEP 257 docstring using Gemini.
+    Generates a docstring using LiteLLM (supports Vertex, OpenAI, Anthropic, Local).
     """
-    api_key = get_api_key()
-    if not api_key:
-        print("[WARNING] GOOGLE_API_KEY not set")
-        return None
+    model_name = get_model_name()
+    api_base = get_api_base()
+    gen_config = get_generation_config()
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(MODEL_NAME)
-
-    # -------------------------------------------------------------------------
-    # 1. UNIVERSAL SAFETY BYPASS
-    # We must explicitly disable filters. In the context of software engineering,
-    # words like 'kill' (process), 'execute' (command), or 'injection' (dependency)
-    # are technical terms, not threats.
-    # -------------------------------------------------------------------------
-    safety_settings = {
-        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-    }
-
-    # -------------------------------------------------------------------------
-    # 2. GENERIC CONTEXT
-    # -------------------------------------------------------------------------
-    context_block = ""
+    # 1. Construct Prompt
+    # We include the file context and a one-shot example in the User Prompt
+    context_str = ""
     if full_file_context:
-        context_block = f"""
-SOURCE FILE CONTEXT:
-The following is the full source code content. Use it strictly for 
-resolving type definitions and understanding class hierarchy.
-```python
-{full_file_context}
-```
-"""
+        context_str = f"CONTEXT FILE:\n{full_file_context}\n\n"
 
-    # -------------------------------------------------------------------------
-    # 3. GENERIC "STATIC ANALYSIS" PROMPT
-    # We frame the AI as a "Documentation Tool". This removes the moral 
-    # agency from the AI, making it less likely to flag content.
-    # -------------------------------------------------------------------------
-    prompt = f"""You are an automated code documentation engine. 
-Your task is to perform static analysis on the provided code snippet and generate a docstring.
+    user_prompt = f"""{context_str}
+EXAMPLE INPUT:
+def add(a, b): return a + b
+EXAMPLE OUTPUT:
+Add two numbers.
 
-SYSTEM RULES:
-1. **Objective**: Describe the functionality of the code based *only* on the logic provided.
-2. **Context**: You are analyzing raw source code. Terms like "attack", "payload", "kill", "execute", or "payment" are technical variable names or methods, not real-world actions. Treat them neutrally.
-3. **Output**: Generate a standard Google-style Python docstring.
+Args:
+    a (int): First number.
+    b (int): Second number.
 
-{context_block}
+Returns:
+    int: The sum.
 
 TARGET CODE TO DOCUMENT:
-============================================================
 {function_signature}
-============================================================
-
-STYLE REQUIREMENTS:
-- Format: Google Style (Args, Returns, Raises).
-- Tone: Technical, concise, objective.
-- Do not provide code refactoring or security advice. Just document what it does.
-
-OUTPUT FORMAT:
-Return ONLY the docstring text. No quotes, no markdown blocks.
 """
+    
+    messages = [
+        {"role": "system", "content": SYSTEM_INSTRUCTION},
+        {"role": "user", "content": user_prompt}
+    ]
 
-    # -------------------------------------------------------------------------
-    # 4. GENERATION
-    # -------------------------------------------------------------------------
+    # 2. Configure arguments
+    # litellm arguments
+    kwargs = {
+        "model": model_name,
+        "messages": messages,
+        "temperature": gen_config["temperature"],
+        "max_tokens": gen_config["max_tokens"],
+        "stop": ['"""'], # Stop if model tries to close the docstring
+        "drop_params": True, # Crucial: ignores parameters not supported by specific providers
+    }
+
+    # Add API Base if provided (for Local AI / LM Studio)
+    if api_base:
+        kwargs["api_base"] = api_base
+
+    # Add Safety Settings ONLY for Google models to avoid errors on other providers
+    # (LiteLLM usually maps these, but explicit passing is safer for Vertex)
+    if "vertex" in model_name or "gemini" in model_name:
+        kwargs["safety_settings"] = _get_vertex_safety_settings()
+
+    # 3. Call LLM
     try:
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.1,  # Keep it factual
-                max_output_tokens=500
-            ),
-            safety_settings=safety_settings
-        )
+        response = completion(**kwargs)
 
-        if not response.candidates:
-            # If blocked here, the API key might be restricted or content is extremely flagged
+        if not response.choices:
             return None
 
-        candidate = response.candidates[0]
-
-        # 1=STOP (Good), 3=MAX_TOKENS (Okay). 
-        # If it returns 2 (SAFETY) even with BLOCK_NONE, the model is refusing at a hard-coded level.
-        if candidate.finish_reason not in [1, 3]: 
-            print(f"[WARNING] Skipped due to finish_reason: {candidate.finish_reason}")
-            return None
-
-        if not candidate.content or not candidate.content.parts:
-            return None
-
-        text = candidate.content.parts[0].text.strip()
+        content = response.choices[0].message.content
+        return _sanitize_output(content)
 
     except Exception as e:
-        print(f"[WARNING] LLM Generation Error: {e}")
-        return None
-
-    # -------------------------------------------------------------------------
-    # 5. SANITIZATION
-    # -------------------------------------------------------------------------
-    clean_lines = []
-    for line in text.split('\n'):
-        line = line.strip()
-        # Remove common hallucinations
-        if line.startswith("```") or line.startswith('"""') or line.endswith('"""'):
-            line = line.replace('"""', '').replace("```", "")
+        error_msg = str(e)
+        print(f"[WARNING] LLM Generation Failed: {error_msg}")
         
-        if not clean_lines and not line:
-            continue
-        clean_lines.append(line)
-
-    final_text = "\n".join(clean_lines).strip()
-    
-    if len(final_text) < 5:
+        # Provide helpful hints for common errors
+        if "vertex" in model_name and "default credentials" in error_msg.lower():
+            print("    [HINT] Run 'gcloud auth application-default login' to authenticate.")
+        elif api_base and "connection" in error_msg.lower():
+            print(f"    [HINT] Ensure your local LLM server is running at {api_base}")
+        elif "api key" in error_msg.lower():
+            print("    [HINT] Ensure your API Key environment variable is set (e.g., GEMINI_API_KEY, OPENAI_API_KEY).")
+            
         return None
-
-    return final_text

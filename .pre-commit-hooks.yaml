@@ -1,10 +1,15 @@
 - id: ai-docfix
   name: AI DocFix
-  description: Automatically generate docstrings for undocumented functions
+  description: Automatically generate docstrings for Python code using LiteLLM (Vertex AI, OpenAI, Local, etc.)
   entry: ai-docfix
   language: python
   types: [python]
   require_serial: true
   stages: [commit]
-  pass_filenames: false
-  additional_dependencies: ['google-generativeai']
+  # Now set to true so pre-commit passes the specific files to process.
+  # This respects 'exclude' rules in your .pre-commit-config.yaml
+  pass_filenames: true
+  # Ensure the isolated environment has the necessary libraries
+  additional_dependencies: 
+    - litellm
+    - google-cloud-aiplatform  # Needed for default Vertex AI support

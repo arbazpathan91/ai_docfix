@@ -1,51 +1,56 @@
 import subprocess
+import sys
+from typing import List, Optional
+
 from .parser import find_doc_issues
 from .llm import generate_docstring
 from .patcher import insert_docstring
 from .validator import validate_line_length, wrap_docstring
 
-# Timeout for each file processing (seconds)
-TIMEOUT_PER_FILE = 30
-
-def get_staged_files():
+def get_staged_files() -> List[str]:
     """Get staged Python files from git."""
     try:
+        # Check against the HEAD to see what is staged
         output = subprocess.check_output(
             ["git", "diff", "--cached", "--name-only"]
         ).decode().strip()
+        
         if not output:
             return []
+            
         return [f for f in output.split("\n") if f.endswith(".py")]
     except subprocess.CalledProcessError:
+        # Not a git repo or git error
         return []
 
-def extract_function_signature(lines, line_no):
-    """Extract function signature with clear markers.
-
-    Args:
-        lines (list): All file lines.
-        line_no (int): The line number of the function.
-
-    Returns:
-        str: The function signature with markers.
+def extract_function_signature(lines: List[str], line_no: int) -> str:
+    """
+    Extract function signature with clear markers.
+    
+    Captures the definition line and up to 5 subsequent lines to 
+    handle multi-line arguments, plus a bit of the body for context.
     """
     start = line_no
     sig_lines = [lines[start]]
     i = start + 1
 
-    # Collect full signature (max 5 lines)
-    while (i < len(lines) and i < start + 5 and (
-        lines[i].strip().startswith("->") or
-        lines[i].strip().startswith(")") or
-        "(" in lines[start] and
-        ")" not in "\n".join(sig_lines)
-    )):
+    # Collect full signature (heuristically up to 5 lines)
+    # Stop if we hit the end of the signature or indentation changes significantly
+    while (i < len(lines) and i < start + 5):
+        line = lines[i].strip()
+        
+        # Heuristic to detect end of signature or start of body
+        if line.endswith(":") and not line.startswith("#"):
+            sig_lines.append(lines[i])
+            i += 1
+            break
+            
         sig_lines.append(lines[i])
         i += 1
 
-    # Add only 1-2 lines of body for context (not 5)
-    for j in range(i, min(i + 2, len(lines))):
-        sig_lines.append(lines[j])
+    # Add 1 line of body context to help LLM understand logic
+    if i < len(lines):
+        sig_lines.append(lines[i])
 
     signature = "\n".join(sig_lines)
 
@@ -55,8 +60,11 @@ def extract_function_signature(lines, line_no):
         "\n=== END FUNCTION/CLASS ==="
     )
 
-def process_file(path):
-    """Process a single file to add missing docstrings."""
+def process_file(path: str) -> bool:
+    """
+    Process a single file to add missing docstrings.
+    Returns True if file was modified.
+    """
     try:
         with open(path, "r", encoding="utf8") as f:
             original = f.read()
@@ -70,61 +78,45 @@ def process_file(path):
     if not issues:
         return False
     
-    # Sort issues in reverse order to avoid line number shifting
+    # Sort issues in reverse order to avoid line number shifting during insertion
     issues.sort(key=lambda x: x.start_line, reverse=True)
     
     successful_updates = 0
     
     for issue in issues:
         try:
-            # Extract just the function signature
+            # Extract context
             func_signature = extract_function_signature(
                 lines, issue.start_line - 1
             )
             
-            # Generate docstring
+            # Generate docstring via LiteLLM
             doc = generate_docstring(
                 function_signature=func_signature,
                 full_file_context=original
             )
             
-            # Skip if generation failed (returns None)
-            if doc is None:
+            if not doc:
                 print(
-                    f"[WARNING] Skipping function at line {issue.start_line}: "
-                    f"Could not generate docstring"
+                    f"[WARNING] Skipping {issue.node.name} at line {issue.start_line}: "
+                    f"LLM returned empty response."
                 )
                 continue
             
-            # Clean up: remove duplicate docstrings
-            lines_list = doc.split('\n')
-            cleaned_lines = []
-            in_docstring = False
-            quote_count = 0
+            # Defensive Cleanup: Ensure no enclosing quotes exist before wrapping
+            # (llm.py handles this mostly, but this is a safety net)
+            doc = doc.strip()
+            if doc.startswith('"""') or doc.startswith("'''"):
+                doc = doc[3:]
+            if doc.endswith('"""') or doc.endswith("'''"):
+                doc = doc[:-3]
+            doc = doc.strip()
             
-            for line in lines_list:
-                if '"""' in line:
-                    quote_count += line.count('"""')
-                    if quote_count >= 2:
-                        # End of first docstring
-                        if '"""' in line:
-                            # Extract text before closing quotes
-                            idx = line.rfind('"""')
-                            if idx > 0:
-                                cleaned_lines.append(
-                                    line[:idx].rstrip()
-                                )
-                        break
-                cleaned_lines.append(line)
+            # Formatting: Validate and Wrap
+            # We trust validator.wrap_docstring to handle indentation and length
+            doc = wrap_docstring(doc, 72)
             
-            doc = '\n'.join(cleaned_lines).strip()
-            
-            # Validate and wrap docstring to PEP 8 standards
-            is_valid, msg = validate_line_length(doc, 72)
-            if not is_valid:
-                doc = wrap_docstring(doc, 72)
-            
-            # Insert docstring
+            # Insert into file lines
             insert_at = issue.start_line - 1
             lines = insert_docstring(lines, insert_at, doc)
             successful_updates += 1
@@ -136,9 +128,7 @@ def process_file(path):
             )
             continue
     
-    # Only write if we successfully generated at least one docstring
     if successful_updates == 0:
-        print(f"[INFO] No docstrings could be generated for {path}")
         return False
     
     # Write back to file
@@ -150,15 +140,30 @@ def process_file(path):
         print(f"[ERROR] Could not write {path}: {e}")
         return False
 
-def main():
-    """Main hook function."""
-    files = get_staged_files()
+def main(files: Optional[List[str]] = None) -> int:
+    """
+    Main hook entry point.
+    
+    Args:
+        files: Optional list of files to process. 
+               If None, attempts to find staged git files.
+    """
+    if not files:
+        files = get_staged_files()
     
     if not files:
+        print("[INFO] No files to process (no args provided and no staged files found).")
         return 0
     
     changed = False
     for f in files:
+        # Simple existence check
+        try:
+            with open(f, 'r'): pass
+        except FileNotFoundError:
+            print(f"[WARNING] File not found: {f}")
+            continue
+
         if process_file(f):
             print(f"[ai-docfix] Added docstrings to: {f}")
             changed = True

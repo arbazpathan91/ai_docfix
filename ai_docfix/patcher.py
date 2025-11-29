@@ -1,64 +1,59 @@
-"""Insert docstrings into Python files."""
+import re
+from typing import List
 
-
-def insert_docstring(original_lines, line_no, docstring):
-    """Insert a docstring after a function or class definition.
+def insert_docstring(original_lines: List[str], line_no: int, docstring: str) -> List[str]:
+    """
+    Insert a docstring after a function or class definition.
 
     Args:
-        original_lines (list): List of all file lines.
-        line_no (int): Line number of def/class statement.
-        docstring (str): The docstring to insert.
+        original_lines (List[str]): List of all file lines.
+        line_no (int): Line number of def/class statement (0-indexed).
+        docstring (str): The clean docstring to insert.
 
     Returns:
-        list: Modified lines with docstring inserted.
+        List[str]: Modified lines with docstring inserted.
     """
+    # Defensive check
+    if line_no < 0 or line_no >= len(original_lines):
+        return original_lines
+
     def_line = original_lines[line_no]
 
-    indent_count = 0
-    for char in def_line:
-        if char == ' ':
-            indent_count += 1
-        else:
-            break
+    # Robust indentation extraction (handles spaces or tabs)
+    # We grab whatever whitespace exists at the start of the definition line.
+    match = re.match(r"^\s*", def_line)
+    base_indent = match.group(0) if match else ""
+    
+    # Standard Python indentation is 4 spaces deeper than the definition
+    # We assume standard 4-space indentation for the body.
+    body_indent = base_indent + "    "
 
-    body_indent = " " * (indent_count + 4)
-
+    # Clean quotes to ensure we don't double-wrap
     docstring = docstring.strip()
-
-    if docstring.startswith('"""'):
+    if docstring.startswith('"""'): 
         docstring = docstring[3:]
-    if docstring.endswith('"""'):
+    if docstring.endswith('"""'): 
         docstring = docstring[:-3]
-
     docstring = docstring.strip()
 
     doc_lines = docstring.split("\n")
 
+    # Build the final docstring block
     formatted_lines = []
     formatted_lines.append(f'{body_indent}"""')
 
     for line in doc_lines:
-        stripped = line.strip()
-
-        if stripped.endswith(':') and stripped in [
-            'Args', 'Returns', 'Raises', 'Yields', 'Note',
-            'Notes', 'Example', 'Examples', 'Attributes'
-        ]:
-            formatted_lines.append(f'{body_indent}{stripped}')
-        elif stripped and not stripped[0].isupper():
-            if ':' in stripped:
-                formatted_lines.append(
-                    f'{body_indent}    {stripped}'
-                )
-            else:
-                formatted_lines.append(f'{body_indent}{stripped}')
-        elif stripped:
-            formatted_lines.append(f'{body_indent}{stripped}')
-        else:
+        if not line:
             formatted_lines.append("")
+        else:
+            # We apply the global body indentation to every line.
+            # Relative indentation (like for Args/Returns) is preserved 
+            # because 'line' comes from validator.py which handles that.
+            formatted_lines.append(f'{body_indent}{line}')
 
     formatted_lines.append(f'{body_indent}"""')
-    formatted_lines.append("")
+    # Add a blank line to separate docstring from code body
+    formatted_lines.append("") 
 
     return (
         original_lines[:line_no + 1] +

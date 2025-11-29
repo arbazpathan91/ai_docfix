@@ -1,20 +1,34 @@
 import sys
+import os
 import argparse
-from .config import set_api_key
 from .hook import main
 
 def cli():
     """Command line interface."""
-    parser = argparse.ArgumentParser(description="AI DocFix - Auto-generate docstrings")
-    parser.add_argument('--api-key', type=str, help='Google API Key')
-    parser.add_argument('files', nargs='*', help='Files to process')
+    parser = argparse.ArgumentParser(
+        description="AI DocFix - Auto-generate docstrings using LiteLLM"
+    )
+    
+    parser.add_argument(
+        '--model', 
+        type=str, 
+        help='Override the AI model (e.g., "vertex_ai/gemini-1.5-flash", "gpt-4o")'
+    )
+    
+    parser.add_argument(
+        'files', 
+        nargs='*', 
+        help='Specific files to process (if empty, defaults to git staged files)'
+    )
     
     args = parser.parse_args()
     
-    if args.api_key:
-        set_api_key(args.api_key)
+    # Set the model override in environment so llm.py picks it up globally
+    if args.model:
+        os.environ["AI_DOCFIX_MODEL"] = args.model
     
-    sys.exit(main())
+    # Pass specific files list to the main hook logic
+    sys.exit(main(files=args.files))
 
 if __name__ == "__main__":
     cli()
