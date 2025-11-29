@@ -3,7 +3,7 @@ from typing import Optional
 from .config import get_api_key
 
 # gemini-1.5-flash is optimized for high-volume tasks like this
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-flash-latest"
 
 def generate_docstring(function_signature: str,
                        full_file_context: Optional[str] = None) -> Optional[str]:
