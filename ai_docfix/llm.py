@@ -2,7 +2,7 @@ from .config import get_api_key
 import google.generativeai as genai
 from typing import Optional
 
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-2.5-flash"
 
 def generate_docstring(function_signature: str, full_file_context: Optional[str] = None) -> str:
     """Generate a concise, complete docstring for the given function using Gemini."""
