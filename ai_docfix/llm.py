@@ -1,12 +1,11 @@
 from .config import get_api_key
 import google.generativeai as genai
-from typing import Optional
 
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-2.5-flash"
 
 
 def generate_docstring(function_signature: str,
-                       full_file_context: Optional[str] = None) -> str:
+                       full_file_context: str = None):
     """Generate a concise, complete docstring for the given
     function using Gemini with PEP 8 compliance."""
     api_key = get_api_key()
@@ -51,13 +50,25 @@ Follow these CRITICAL rules:
 FORMATTING RULES:
 - Each line including indentation must be ≤ 72 characters
 - Break long descriptions across multiple lines
-- Indent continuation lines by 4 spaces
+- Indent continuation lines by 8 spaces total (4 for body + 4)
 - Leave blank line between summary and description
 - Leave blank line between description and Args
+- In Args/Returns: description starts after type on same line
+- If description is long, wrap to next line with 8-space indent
+
+EXAMPLE:
+    Args:
+        param1 (str): Short description.
+        param2 (dict): This is a longer description that
+            wraps to the next line with extra indent.
+    
+    Returns:
+        bool: This is a long return description that
+            wraps properly to the next line.
 
 QUALITY RULES:
 - Output ONLY the docstring content
-- NO triple quotes (\"\"\")
+- NO triple quotes ("\"\"\)
 - NO code blocks or markdown backticks
 - NO extra formatting or explanation
 - Be specific to THIS function only
@@ -71,7 +82,7 @@ QUALITY RULES:
   passed to __init__, not attributes set internally
 """
 
-    response: genai.types.GenerateContentResponse = model.generate_content(
+    response = model.generate_content(
         prompt,
         generation_config=genai.types.GenerationConfig(
             temperature=0.3

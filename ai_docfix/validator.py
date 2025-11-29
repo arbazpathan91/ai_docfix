@@ -43,12 +43,21 @@ def wrap_docstring(docstring: str, max_length: int = 72):
     for line in lines:
         if len(line) <= max_length:
             wrapped_lines.append(line)
+            continue
+        
+        # Get base indentation
+        indent = len(line) - len(line.lstrip())
+        indent_str = " " * indent
+        
+        # For continuation lines in Args/Returns, add extra indent
+        if line.lstrip().startswith(('Args:', 'Returns:', 
+                                      'Raises:', 'Yields:')):
+            wrapped_lines.append(line)
+        elif indent > 0 and ':' in line:
+            # This is a parameter line - preserve it
+            wrapped_lines.append(line)
         else:
-            # Get indentation of current line
-            indent = len(line) - len(line.lstrip())
-            indent_str = " " * indent
-            
-            # Wrap long lines
+            # Wrap long description lines
             words = line.split()
             current_line = indent_str + words[0]
             
@@ -58,7 +67,9 @@ def wrap_docstring(docstring: str, max_length: int = 72):
                     current_line = test_line
                 else:
                     wrapped_lines.append(current_line)
-                    current_line = indent_str + word
+                    # Continuation lines get extra indent
+                    continuation_indent = " " * (indent + 4)
+                    current_line = continuation_indent + word
             
             wrapped_lines.append(current_line)
     
