@@ -1,14 +1,12 @@
 from .config import get_api_key
 import google.generativeai as genai
-from typing import Optional
 
-MODEL_NAME = "gemini-flash-latest"
+MODEL_NAME = "gemini-2.0-flash"
 
 
 def generate_docstring(function_signature: str,
-                       full_file_context: Optional[str] = None) -> str:
-    """Generate a concise, complete docstring for the given
-    function using Gemini with PEP 8 compliance."""
+                       full_file_context: str = None):
+    """Generate a docstring for the given function."""
     api_key = get_api_key()
     if not api_key:
         raise Exception("GOOGLE_API_KEY not set")
@@ -16,61 +14,50 @@ def generate_docstring(function_signature: str,
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(MODEL_NAME)
 
-    # Build context-aware prompt
-    prompt = f"""You are a Python documentation expert.
-Generate a PEP 257 compliant docstring for a specific function.
+    prompt = f"""Write a Python docstring for this function.
 
-TARGET FUNCTION TO DOCUMENT:
-The function/class marked between the === markers below is
-the ONLY one you should write a docstring for.
-
+Function:
 {function_signature}
 
-Generate ONLY the docstring for the marked function above.
-Do NOT use docstrings from other functions.
-
-Follow these rules:
-
-1. Google-style docstring format
-2. Line length ≤ 72 characters (PEP 8)
-3. Concise one-line summary
-4. Brief description (1-2 sentences if needed)
-5. Args section with types and descriptions
-6. Returns section only if function returns a value
-7. Raises section only if function raises exceptions
-8. Do NOT include Returns/Raises for None-returning functions
-
-OUTPUT RULES:
-- Output ONLY the docstring content
-- NO triple quotes (\"\"\")
-- NO code blocks or markdown
-- NO extra text or explanation
-- Be specific to THIS function only
+Requirements:
+- Use Google-style format
+- Keep lines under 72 characters
+- Include Args, Returns, Raises if applicable
+- Be concise and clear
+- Output only the docstring text, no quotes or code blocks
 """
 
     try:
-        response: genai.types.GenerateContentResponse = model.generate_content(
+        response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
                 temperature=0.2,
-                max_output_tokens=300
+                max_output_tokens=200,
+                top_p=0.8
             )
         )
+
+        if not response.text:
+            raise Exception(
+                "LLM returned empty response. "
+                "Try again or check your API quota."
+            )
+
+        text = response.text.strip()
+
     except Exception as e:
         raise Exception(
             f"LLM generation failed: {str(e)}"
         )
 
-    text = response.text.strip()
-
     # Remove markdown code blocks if present
     if text.startswith("```python"):
-        text = text[9:]  # Remove ```python
+        text = text[9:]
     if text.startswith("```"):
-        text = text[3:]  # Remove ```
+        text = text[3:]
 
     if text.endswith("```"):
-        text = text[:-3]  # Remove trailing ```
+        text = text[:-3]
 
     text = text.strip()
 

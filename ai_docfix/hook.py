@@ -1,7 +1,4 @@
 import subprocess
-import sys
-import ast
-import signal
 from .parser import find_doc_issues
 from .llm import generate_docstring
 from .patcher import insert_docstring
