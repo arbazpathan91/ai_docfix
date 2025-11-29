@@ -4,6 +4,9 @@ def insert_docstring(original_lines, line_no, docstring):
     def_line = original_lines[line_no]
     indent = " " * (len(def_line) - len(def_line.lstrip()))
     
+    # Add extra indentation for docstring body
+    body_indent = indent + "    "
+    
     # Clean up docstring
     docstring = docstring.strip()
     
@@ -20,16 +23,16 @@ def insert_docstring(original_lines, line_no, docstring):
     
     # Format the docstring properly
     formatted_lines = []
-    formatted_lines.append(f'{indent}"""')
+    formatted_lines.append(f'{body_indent}"""')
     
     for line in doc_lines:
         # Add indentation to each line
         if line.strip():  # Non-empty line
-            formatted_lines.append(f'{indent}{line}')
+            formatted_lines.append(f'{body_indent}{line}')
         else:  # Empty line
             formatted_lines.append("")
     
-    formatted_lines.append(f'{indent}"""')
+    formatted_lines.append(f'{body_indent}"""')
     formatted_lines.append("")  # Blank line after docstring
     
     # Insert after the function/class definition

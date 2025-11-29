@@ -41,8 +41,8 @@ def process_file(path):
             snippet_end = min(len(lines), issue.start_line + 10)
             snippet = "\n".join(lines[snippet_start:snippet_end])
             
-            # Generate docstring
-            doc = generate_docstring(snippet)
+            # Generate docstring with full file context
+            doc = generate_docstring(snippet, full_file_context=original)
             
             # Insert docstring
             insert_at = issue.start_line - 1
@@ -74,13 +74,7 @@ def main():
             changed = True
     
     if changed:
-        # Stage the changes
-        try:
-            subprocess.check_call(["git", "add"] + files)
-            print("[ai-docfix] Please review the changes and commit again.")
-            return 1  # Exit with 1 to prevent commit
-        except subprocess.CalledProcessError:
-            print("[ERROR] Failed to stage changes")
-            return 1
+        print("[ai-docfix] Docstrings added. Please review changes, stage them, and commit again.")
+        return 1  # Exit with 1 to prevent commit - user must review and stage manually
     
     return 0
