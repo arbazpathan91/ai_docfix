@@ -6,17 +6,27 @@ MODEL_NAME = "gemini-flash-latest"
 
 
 def generate_docstring(function_signature: str,
-                       full_file_context: Optional[str] = None) -> str:
-    """Generate a concise, complete docstring for the given
-    function using Gemini with PEP 8 compliance."""
+                       full_file_context: Optional[str] = None) -> Optional[str]:
+    """Generate a concise, complete docstring for the given function.
+    
+    Uses Gemini with PEP 8 compliance. Returns None if generation fails
+    (e.g., due to safety filters or API errors) to allow hook to continue.
+    
+    Args:
+        function_signature: The function signature to document
+        full_file_context: Optional full file content for context
+        
+    Returns:
+        Generated docstring text without triple quotes, or None if failed
+    """
     api_key = get_api_key()
     if not api_key:
-        raise Exception("GOOGLE_API_KEY not set")
+        print("[WARNING] GOOGLE_API_KEY not set, skipping docstring generation")
+        return None
 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(MODEL_NAME)
 
-    # Build context-aware prompt
     prompt = f"""You are a Python documentation expert.
 Generate a PEP 257 compliant docstring for a specific function.
 
@@ -49,29 +59,55 @@ OUTPUT RULES:
 """
 
     try:
-        response: genai.types.GenerateContentResponse = model.generate_content(
+        response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
                 temperature=0.2,
                 max_output_tokens=300
             )
+            # Using default safety settings - no safety_settings parameter
         )
+        
+        # Check if response was blocked
+        if not response.candidates:
+            print("[WARNING] API response blocked: No candidates returned")
+            return None
+        
+        candidate = response.candidates[0]
+        
+        # Check finish reason
+        if candidate.finish_reason == 2:  # SAFETY
+            print("[WARNING] Response blocked by safety filters, skipping this function")
+            return None
+        
+        if candidate.finish_reason not in [0, 1]:  # UNSPECIFIED or STOP
+            print(f"[WARNING] Generation incomplete (finish_reason: {candidate.finish_reason})")
+            return None
+        
+        # Check for content
+        if not candidate.content or not candidate.content.parts:
+            print("[WARNING] No content parts in response")
+            return None
+            
+        text = candidate.content.parts[0].text.strip()
+        
     except Exception as e:
-        raise Exception(
-            f"LLM generation failed: {str(e)}"
-        )
-
-    text = response.text.strip()
+        print(f"[WARNING] LLM generation failed: {str(e)}")
+        return None
 
     # Remove markdown code blocks if present
     if text.startswith("```python"):
-        text = text[9:]  # Remove ```python
+        text = text[9:]
     if text.startswith("```"):
-        text = text[3:]  # Remove ```
-
+        text = text[3:]
     if text.endswith("```"):
-        text = text[:-3]  # Remove trailing ```
+        text = text[:-3]
 
     text = text.strip()
-
+    
+    # Final validation - ensure we got something useful
+    if not text or len(text) < 10:
+        print("[WARNING] Generated docstring too short or empty")
+        return None
+    
     return text

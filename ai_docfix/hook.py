@@ -73,6 +73,8 @@ def process_file(path):
     # Sort issues in reverse order to avoid line number shifting
     issues.sort(key=lambda x: x.start_line, reverse=True)
     
+    successful_updates = 0
+    
     for issue in issues:
         try:
             # Extract just the function signature
@@ -85,6 +87,14 @@ def process_file(path):
                 function_signature=func_signature,
                 full_file_context=original
             )
+            
+            # Skip if generation failed (returns None)
+            if doc is None:
+                print(
+                    f"[WARNING] Skipping function at line {issue.start_line}: "
+                    f"Could not generate docstring"
+                )
+                continue
             
             # Clean up: remove duplicate docstrings
             lines_list = doc.split('\n')
@@ -117,12 +127,19 @@ def process_file(path):
             # Insert docstring
             insert_at = issue.start_line - 1
             lines = insert_docstring(lines, insert_at, doc)
+            successful_updates += 1
+            
         except Exception as e:
             print(
-                f"[ERROR] Failed to process function at "
+                f"[WARNING] Failed to process function at "
                 f"line {issue.start_line}: {e}"
             )
             continue
+    
+    # Only write if we successfully generated at least one docstring
+    if successful_updates == 0:
+        print(f"[INFO] No docstrings could be generated for {path}")
+        return False
     
     # Write back to file
     try:
