@@ -1,7 +1,7 @@
 from .config import get_api_key
 import google.generativeai as genai
 
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-2.0-flash-lite"
 
 def generate_docstring(code_snippet: str, full_file_context: str = None):
     """Generate a concise, complete docstring for the given code snippet using Gemini."""
@@ -36,9 +36,10 @@ Generate a concise docstring that includes:
 Requirements:
 - Be concise but complete
 - Use proper Python docstring format (Google style)
-- Only output the docstring text, no triple quotes
-- No code blocks or markdown
+- Only output the docstring text, NO triple quotes
+- NO code blocks, NO markdown, NO backticks
 - Match the file's patterns and conventions
+- Output ONLY the docstring content, nothing else
 """
     else:
         prompt = f"""Generate a concise but complete Python docstring for this function/class.
@@ -67,4 +68,17 @@ Requirements:
         generation_config=genai.types.GenerationConfig(temperature=0.3)
     )
     
-    return response.text.strip()
+    text = response.text.strip()
+    
+    # Remove markdown code blocks if present
+    if text.startswith("```python"):
+        text = text[9:]  # Remove ```python
+    if text.startswith("```"):
+        text = text[3:]  # Remove ```
+    
+    if text.endswith("```"):
+        text = text[:-3]  # Remove trailing ```
+    
+    text = text.strip()
+    
+    return text
