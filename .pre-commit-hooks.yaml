@@ -12,4 +12,3 @@
   # Ensure the isolated environment has the necessary libraries
   additional_dependencies: 
     - litellm
-    - google-cloud-aiplatform  # Needed for default Vertex AI support
