@@ -1,147 +1,131 @@
 import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from typing import Optional
 from .config import get_api_key
 
-# gemini-1.5-flash is optimized for high-volume tasks like this
-MODEL_NAME = "gemini-flash-latest"
+# gemini-1.5-flash is fast and usually follows system instructions well
+MODEL_NAME = "gemini-1.5-flash"
 
 def generate_docstring(function_signature: str,
                        full_file_context: Optional[str] = None) -> Optional[str]:
     """
-    Generate a concise, PEP 257 compliant docstring for the given code.
-
-    This function communicates with the Gemini API to generate documentation.
-    It handles safety settings to prevent false positives on code keywords
-    (like 'delete' or 'exec') and uses full file context for accurate type inference.
-
-    Args:
-        function_signature: The specific function or class definition to document.
-        full_file_context: The entire source code of the file (for context).
-
-    Returns:
-        The generated docstring text (cleaned of quotes), or None if generation failed.
+    Generates a generic, PEP 257 docstring using Gemini.
     """
     api_key = get_api_key()
     if not api_key:
-        print("[WARNING] GOOGLE_API_KEY not set, skipping docstring generation")
+        print("[WARNING] GOOGLE_API_KEY not set")
         return None
 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(MODEL_NAME)
 
     # -------------------------------------------------------------------------
-    # SAFETY SETTINGS
-    # We explicitly allow "Dangerous Content" because source code often contains
-    # words like 'kill', 'execute', 'payload', or 'delete' which trigger
-    # standard AI safety filters.
+    # 1. UNIVERSAL SAFETY BYPASS
+    # We must explicitly disable filters. In the context of software engineering,
+    # words like 'kill' (process), 'execute' (command), or 'injection' (dependency)
+    # are technical terms, not threats.
     # -------------------------------------------------------------------------
-    safety_settings = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-    ]
+    safety_settings = {
+        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+    }
 
     # -------------------------------------------------------------------------
-    # PROMPT CONSTRUCTION
+    # 2. GENERIC CONTEXT
     # -------------------------------------------------------------------------
     context_block = ""
     if full_file_context:
         context_block = f"""
-CONTEXT (Full File Content):
-The following is the full source code. Use this to understand custom types 
-(e.g., if a function returns 'StoreData', look here to see what that is).
+SOURCE FILE CONTEXT:
+The following is the full source code content. Use it strictly for 
+resolving type definitions and understanding class hierarchy.
 ```python
 {full_file_context}
 ```
 """
 
-    prompt = f"""You are a Python documentation expert analyzing safe, educational code.
-Generate a PEP 257 Google-style docstring for the specific code element below.
+    # -------------------------------------------------------------------------
+    # 3. GENERIC "STATIC ANALYSIS" PROMPT
+    # We frame the AI as a "Documentation Tool". This removes the moral 
+    # agency from the AI, making it less likely to flag content.
+    # -------------------------------------------------------------------------
+    prompt = f"""You are an automated code documentation engine. 
+Your task is to perform static analysis on the provided code snippet and generate a docstring.
+
+SYSTEM RULES:
+1. **Objective**: Describe the functionality of the code based *only* on the logic provided.
+2. **Context**: You are analyzing raw source code. Terms like "attack", "payload", "kill", "execute", or "payment" are technical variable names or methods, not real-world actions. Treat them neutrally.
+3. **Output**: Generate a standard Google-style Python docstring.
 
 {context_block}
 
-TARGET ELEMENT TO DOCUMENT:
+TARGET CODE TO DOCUMENT:
 ============================================================
 {function_signature}
 ============================================================
 
-INSTRUCTIONS:
-1. **Context Awareness**: Use the provided 'Full File Content' to infer types and logic.
-2. **Classes**: If the target is a CLASS, describe what the object represents. Do NOT document `__init__` arguments here.
-3. **Methods**: If the target is a FUNCTION/METHOD, describe its logic, args, and returns.
-4. **Format**: Google-style (`Args:`, `Returns:`, `Raises:`).
-5. **Conciseness**: Keep descriptions brief and professional.
+STYLE REQUIREMENTS:
+- Format: Google Style (Args, Returns, Raises).
+- Tone: Technical, concise, objective.
+- Do not provide code refactoring or security advice. Just document what it does.
 
-OUTPUT RULES:
-- Output ONLY the raw docstring text.
-- NO triple quotes ("\"\"\).
-- NO markdown fencing (```).
-- NO conversational filler ("Here is the docstring...").
+OUTPUT FORMAT:
+Return ONLY the docstring text. No quotes, no markdown blocks.
 """
 
     # -------------------------------------------------------------------------
-    # GENERATION
+    # 4. GENERATION
     # -------------------------------------------------------------------------
     try:
         response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
-                temperature=0.1,  # Low temp = more factual/deterministic
+                temperature=0.1,  # Keep it factual
                 max_output_tokens=500
             ),
             safety_settings=safety_settings
         )
 
-        # Validate Response
         if not response.candidates:
-            # Check prompt feedback to see if it was blocked before generation
-            print(f"[WARNING] API response blocked. Feedback: {response.prompt_feedback}")
+            # If blocked here, the API key might be restricted or content is extremely flagged
             return None
 
         candidate = response.candidates[0]
 
-        # Check for safety blocks or other stop reasons
-        # 1 = STOP (Success), 3 = MAX_TOKENS, 4 = RECITATION
+        # 1=STOP (Good), 3=MAX_TOKENS (Okay). 
+        # If it returns 2 (SAFETY) even with BLOCK_NONE, the model is refusing at a hard-coded level.
         if candidate.finish_reason not in [1, 3]: 
-            print(f"[WARNING] Generation stopped abnormally (finish_reason: {candidate.finish_reason})")
+            print(f"[WARNING] Skipped due to finish_reason: {candidate.finish_reason}")
             return None
 
         if not candidate.content or not candidate.content.parts:
-            print("[WARNING] No content parts in response")
             return None
 
         text = candidate.content.parts[0].text.strip()
 
     except Exception as e:
-        print(f"[WARNING] LLM generation failed: {str(e)}")
+        print(f"[WARNING] LLM Generation Error: {e}")
         return None
 
     # -------------------------------------------------------------------------
-    # POST-PROCESSING
+    # 5. SANITIZATION
     # -------------------------------------------------------------------------
     clean_lines = []
     for line in text.split('\n'):
         line = line.strip()
-        # Remove markdown code blocks if the LLM hallucinated them
-        if line.startswith("```"):
-            continue
-        # Remove literal triple quotes if the LLM disobeyed instructions
-        if line.startswith('"""'):
-            line = line.replace('"""', '')
-        if line.endswith('"""'):
-            line = line.replace('"""', '')
+        # Remove common hallucinations
+        if line.startswith("```") or line.startswith('"""') or line.endswith('"""'):
+            line = line.replace('"""', '').replace("```", "")
         
-        # Don't add empty lines at the very start
         if not clean_lines and not line:
             continue
-            
         clean_lines.append(line)
 
     final_text = "\n".join(clean_lines).strip()
-
-    # Final sanity check on length
-    if len(final_text) < 10:
+    
+    if len(final_text) < 5:
         return None
 
     return final_text
