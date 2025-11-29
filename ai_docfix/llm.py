@@ -2,7 +2,6 @@ import os
 import sys
 from typing import Optional, List, Dict, Any
 
-# Attempt to import litellm, handle missing dependency gracefully
 try:
     import litellm
     from litellm import completion
@@ -13,11 +12,6 @@ except ImportError:
 
 from .config import get_model_name, get_api_base, get_generation_config
 
-# =============================================================================
-# PROMPT DEFINITIONS
-# =============================================================================
-
-# We separate the "Persona/Rules" from the "Data" to prevent Jailbreak/Safety triggers.
 SYSTEM_INSTRUCTION = """
 You are a Senior Python Technical Writer. 
 Your only task is to write Google-style (PEP 257) docstrings for Python code.
@@ -32,10 +26,7 @@ RULES:
 """
 
 def _get_vertex_safety_settings() -> List[Dict[str, str]]:
-    """
-    Returns safety settings specifically for Google/Vertex models.
-    We set thresholds to BLOCK_NONE to allow technical terms like 'kill_process'.
-    """
+    """Returns safety settings specifically for Google/Vertex models."""
     return [
         {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
         {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -44,33 +35,19 @@ def _get_vertex_safety_settings() -> List[Dict[str, str]]:
     ]
 
 def _sanitize_output(text: str) -> Optional[str]:
-    """
-    Clean up LLM output: remove markdown code blocks and quotes.
-    """
     if not text:
         return None
     
     clean_lines = []
     lines = text.split('\n')
-    
     for line in lines:
         line = line.rstrip()
-        
-        # Remove common markdown artifacts
-        if line.strip().startswith("```"): 
-            continue
-        
-        # Remove quotes if the LLM output them despite instructions
-        if line.strip() in ['"""', "'''"]: 
-            continue
-            
+        if line.strip().startswith("```"): continue
+        if line.strip() in ['"""', "'''"]: continue
         clean_lines.append(line)
 
-    # Remove empty lines from start/end
-    while clean_lines and not clean_lines[0].strip(): 
-        clean_lines.pop(0)
-    while clean_lines and not clean_lines[-1].strip(): 
-        clean_lines.pop()
+    while clean_lines and not clean_lines[0].strip(): clean_lines.pop(0)
+    while clean_lines and not clean_lines[-1].strip(): clean_lines.pop()
 
     final_text = "\n".join(clean_lines)
     return final_text if final_text else None
@@ -78,18 +55,22 @@ def _sanitize_output(text: str) -> Optional[str]:
 def generate_docstring(function_signature: str,
                        full_file_context: Optional[str] = None) -> Optional[str]:
     """
-    Generates a docstring using LiteLLM (supports Vertex, OpenAI, Anthropic, Local).
+    Generates a docstring using LiteLLM.
     """
     model_name = get_model_name()
     api_base = get_api_base()
     gen_config = get_generation_config()
 
-    # 1. Construct Prompt
-    # We include the file context and a one-shot example in the User Prompt
-    context_str = ""
-    if full_file_context:
-        context_str = f"CONTEXT FILE:\n{full_file_context}\n\n"
+    # -------------------------------------------------------------------------
+    # CONFIGURATION SANITIZATION
+    # -------------------------------------------------------------------------
+    # If using Vertex AI or Google AI Studio, we MUST ignore the custom api_base
+    # (e.g. localhost) or the SDK will try to send Google requests to localhost.
+    if "vertex_ai" in model_name or "gemini" in model_name:
+        api_base = None
 
+    # 1. Construct Prompt
+    context_str = f"CONTEXT FILE:\n{full_file_context}\n\n" if full_file_context else ""
     user_prompt = f"""{context_str}
 EXAMPLE INPUT:
 def add(a, b): return a + b
@@ -113,22 +94,19 @@ TARGET CODE TO DOCUMENT:
     ]
 
     # 2. Configure arguments
-    # litellm arguments
     kwargs = {
         "model": model_name,
         "messages": messages,
         "temperature": gen_config["temperature"],
         "max_tokens": gen_config["max_tokens"],
-        "stop": ['"""'], # Stop if model tries to close the docstring
-        "drop_params": True, # Crucial: ignores parameters not supported by specific providers
+        "stop": ['"""'],
+        "drop_params": True,
     }
 
-    # Add API Base if provided (for Local AI / LM Studio)
     if api_base:
         kwargs["api_base"] = api_base
 
-    # Add Safety Settings ONLY for Google models to avoid errors on other providers
-    # (LiteLLM usually maps these, but explicit passing is safer for Vertex)
+    # Add Safety Settings ONLY for Google models
     if "vertex" in model_name or "gemini" in model_name:
         kwargs["safety_settings"] = _get_vertex_safety_settings()
 
@@ -146,12 +124,12 @@ TARGET CODE TO DOCUMENT:
         error_msg = str(e)
         print(f"[WARNING] LLM Generation Failed: {error_msg}")
         
-        # Provide helpful hints for common errors
+        # Hints
         if "vertex" in model_name and "default credentials" in error_msg.lower():
             print("    [HINT] Run 'gcloud auth application-default login' to authenticate.")
         elif api_base and "connection" in error_msg.lower():
             print(f"    [HINT] Ensure your local LLM server is running at {api_base}")
         elif "api key" in error_msg.lower():
-            print("    [HINT] Ensure your API Key environment variable is set (e.g., GEMINI_API_KEY, OPENAI_API_KEY).")
+            print("    [HINT] Ensure your API Key environment variable is set.")
             
         return None
