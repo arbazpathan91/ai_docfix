@@ -3,7 +3,6 @@ import sys
 import ast
 from .parser import find_doc_issues
 from .llm import generate_docstring
-from .patcher import insert_docstring
 from .validator import validate_line_length, wrap_docstring
 
 def get_staged_files():
