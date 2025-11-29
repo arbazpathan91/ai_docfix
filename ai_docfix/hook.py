@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import re
 from typing import List, Set, Optional, Tuple
 
 from .parser import find_doc_issues
@@ -26,27 +27,42 @@ def get_partially_staged_files() -> Set[str]:
         return set()
 
 def extract_function_signature(lines: List[str], line_no: int) -> str:
-    start = line_no
-    sig_lines = [lines[start]]
-    i = start + 1
-    while (i < len(lines) and i < start + 5):
-        line = lines[i].strip()
-        if line.endswith(":") and not line.startswith("#"):
-            sig_lines.append(lines[i])
+    """
+    Extract ONLY the function/class signature (up to the colon).
+    Does not include body code to prevent LLM confusion.
+    """
+    sig_lines = []
+    i = line_no
+    
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        
+        # Skip comments if they appear before the def/class (rare given line_no comes from AST)
+        if stripped.startswith('#'):
+            sig_lines.append(line)
             i += 1
-            break
-        sig_lines.append(lines[i])
+            continue
+            
+        sig_lines.append(line)
+        
+        # Check if this line ends the signature
+        # 1. Ends with ':' (standard)
+        # 2. Ends with ':\s*#.*' (colon followed by comment)
+        if ':' in stripped:
+            # check if colon is the last significant char (ignoring comments)
+            pre_comment = stripped.split('#')[0].strip()
+            if pre_comment.endswith(':'):
+                break
+        
         i += 1
-    if i < len(lines):
-        sig_lines.append(lines[i])
-    return (
-        "=== FUNCTION/CLASS TO DOCUMENT ===\n" + "\n".join(sig_lines) + "\n=== END FUNCTION/CLASS ==="
-    )
+        # Safety break to prevent grabbing the whole file if syntax is weird
+        if i > line_no + 10: 
+            break
+
+    return "\n".join(sig_lines)
 
 def process_file(path: str) -> Tuple[bool, bool]:
-    """
-    Returns: (was_modified, encountered_errors)
-    """
     try:
         with open(path, "r", encoding="utf8") as f:
             original = f.read()
@@ -66,21 +82,24 @@ def process_file(path: str) -> Tuple[bool, bool]:
     
     for issue in issues:
         try:
+            # 1. Extract strictly the signature
             func_signature = extract_function_signature(lines, issue.start_line - 1)
+            
+            # 2. Generate
             doc = generate_docstring(func_signature, full_file_context=original)
             
             if not doc:
-                # IMPORTANT: If we found an issue but got no doc, that's an ERROR.
-                # We flag it so we can fail the hook and show logs.
                 print(f"[ERROR] LLM failed to generate docstring for line {issue.start_line} in {path}")
                 errors = True
                 continue
             
+            # 3. Clean
             doc = doc.strip()
             if doc.startswith('"""') or doc.startswith("'''"): doc = doc[3:]
             if doc.endswith('"""') or doc.endswith("'''"): doc = doc[:-3]
             doc = doc.strip()
             
+            # 4. Wrap & Patch
             doc = wrap_docstring(doc, 72)
             lines = insert_docstring(lines, issue.start_line - 1, doc)
             successful_updates += 1
@@ -108,12 +127,11 @@ def main(files: Optional[List[str]] = None) -> int:
     if not files:
         return 0
     
-    # 1. Block Partial Staging
+    # Block Partial Staging
     dirty_files = get_partially_staged_files()
     overlapping = [f for f in files if f in dirty_files]
     if overlapping:
         print("\n[!] STOPPING COMMIT: Staged files have unstaged changes on disk.")
-        print("    This usually happens if you generated docs but forgot to 'git add' them.")
         print("    Files:")
         for f in overlapping:
             print(f"     - {f}")
@@ -136,14 +154,12 @@ def main(files: Optional[List[str]] = None) -> int:
         if error:
             any_errors = True
     
-    # 2. Logic for Exit Codes
     if any_changes:
         print("\n[ai-docfix] Docstrings generated. Please 'git add' them and commit again.")
         return 1
     
     if any_errors:
         print("\n[ai-docfix] Failed to generate some docstrings. See logs above.")
-        # We return 1 so pre-commit shows the error logs (stdout/stderr)
         return 1
     
     return 0
