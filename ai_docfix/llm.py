@@ -1,7 +1,7 @@
 from .config import get_api_key
 import google.generativeai as genai
 
-MODEL_NAME = "gemini-2.0-flash-lite"
+MODEL_NAME = "gemini-2.0-flash"
 
 def generate_docstring(code_snippet: str, full_file_context: str = None):
     """Generate a concise, complete docstring for the given code snippet using Gemini."""
@@ -40,6 +40,8 @@ Requirements:
 - NO code blocks, NO markdown, NO backticks
 - Match the file's patterns and conventions
 - Output ONLY the docstring content, nothing else
+- Follow pep-8 guidelines
+- Ensure line length does not exceed 72 characters
 """
     else:
         prompt = f"""Generate a concise but complete Python docstring for this function/class.
