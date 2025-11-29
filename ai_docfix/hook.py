@@ -19,28 +19,41 @@ def get_staged_files():
         return []
 
 def extract_function_signature(lines, line_no):
-    """Extract just the function/class definition and a few lines of body."""
-    # Find the start of the def/class line
-    start = line_no
+    """Extract function signature with clear markers.
     
-    # Collect the definition line(s) - might span multiple lines
+    Args:
+        lines (list): All file lines.
+        line_no (int): The line number of the function.
+    
+    Returns:
+        str: The function signature with markers.
+    """
+    start = line_no
     sig_lines = [lines[start]]
     i = start + 1
     
-    # For multi-line signatures (with \ or unclosed parens), keep collecting
+    # Collect full signature (including decorators above)
     while i < len(lines) and (
         lines[i].strip().startswith("->") or 
         lines[i].strip().startswith(")") or
-        "(" in lines[start] and ")" not in "\n".join(sig_lines)
+        "(" in lines[start] and 
+        ")" not in "\n".join(sig_lines)
     ):
         sig_lines.append(lines[i])
         i += 1
     
     # Add a few lines of body for context
-    for j in range(i, min(i + 5, len(lines))):
+    for j in range(i, min(i + 3, len(lines))):
         sig_lines.append(lines[j])
     
-    return "\n".join(sig_lines)
+    signature = "\n".join(sig_lines)
+    
+    # Add clear markers for the LLM
+    return (
+        "=== FUNCTION/CLASS TO DOCUMENT ===\n" +
+        signature +
+        "\n=== END FUNCTION/CLASS ==="
+    )
 
 def process_file(path):
     """Process a single file to add missing docstrings."""
@@ -62,20 +75,53 @@ def process_file(path):
     
     for issue in issues:
         try:
-            # Extract just the function signature and its name
-            func_signature = extract_function_signature(lines, issue.start_line - 1)
+            # Extract just the function signature
+            func_signature = extract_function_signature(
+                lines, issue.start_line - 1
+            )
             
-            # Generate docstring with full file context and specific function signature
+            # Generate docstring
             doc = generate_docstring(
                 function_signature=func_signature,
                 full_file_context=original
             )
             
+            # Clean up: remove duplicate docstrings
+            lines_list = doc.split('\n')
+            cleaned_lines = []
+            in_docstring = False
+            quote_count = 0
+            
+            for line in lines_list:
+                if '"""' in line:
+                    quote_count += line.count('"""')
+                    if quote_count >= 2:
+                        # End of first docstring
+                        if '"""' in line:
+                            # Extract text before closing quotes
+                            idx = line.rfind('"""')
+                            if idx > 0:
+                                cleaned_lines.append(
+                                    line[:idx].rstrip()
+                                )
+                        break
+                cleaned_lines.append(line)
+            
+            doc = '\n'.join(cleaned_lines).strip()
+            
+            # Validate and wrap docstring to PEP 8 standards
+            is_valid, msg = validate_line_length(doc, 72)
+            if not is_valid:
+                doc = wrap_docstring(doc, 72)
+            
             # Insert docstring
             insert_at = issue.start_line - 1
             lines = insert_docstring(lines, insert_at, doc)
         except Exception as e:
-            print(f"[ERROR] Failed to process function at line {issue.start_line}: {e}")
+            print(
+                f"[ERROR] Failed to process function at "
+                f"line {issue.start_line}: {e}"
+            )
             continue
     
     # Write back to file
@@ -101,7 +147,12 @@ def main():
             changed = True
     
     if changed:
-        print("[ai-docfix] Docstrings added. Please review changes, stage them, and commit again.")
-        return 1  # Exit with 1 to prevent commit - user must review and stage manually
+        msg = (
+            "[ai-docfix] Docstrings added. "
+            "Please review changes, stage them, "
+            "and commit again."
+        )
+        print(msg)
+        return 1
     
     return 0

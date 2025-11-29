@@ -13,11 +13,22 @@ def insert_docstring(original_lines, line_no, docstring):
         list: Modified list with docstring inserted.
     """
     def_line = original_lines[line_no]
-    indent = " " * (len(def_line) - len(def_line.lstrip()))
-    body_indent = indent + "    "
+    
+    # Calculate indentation - count spaces before first non-space
+    indent_count = 0
+    for char in def_line:
+        if char == ' ':
+            indent_count += 1
+        else:
+            break
+    
+    indent = " " * indent_count
+    body_indent = " " * (indent_count + 4)
 
+    # Clean docstring
     docstring = docstring.strip()
 
+    # Remove triple quotes if LLM added them
     if docstring.startswith('"""'):
         docstring = docstring[3:]
     if docstring.endswith('"""'):
@@ -25,15 +36,19 @@ def insert_docstring(original_lines, line_no, docstring):
 
     docstring = docstring.strip()
 
+    # Split into lines and format consistently
     doc_lines = docstring.split("\n")
 
     formatted_lines = []
     formatted_lines.append(f'{body_indent}"""')
 
     for line in doc_lines:
-        if line.strip():
-            formatted_lines.append(f'{body_indent}{line}')
+        stripped = line.strip()
+        if stripped:
+            # Remove any leading spaces and re-add consistent indent
+            formatted_lines.append(f'{body_indent}{stripped}')
         else:
+            # Preserve blank lines
             formatted_lines.append("")
 
     formatted_lines.append(f'{body_indent}"""')
