@@ -2,7 +2,7 @@ from .config import get_api_key
 import google.generativeai as genai
 from typing import Optional
 
-MODEL_NAME = "gemini-3-pro-preview"
+MODEL_NAME = "gemini-flash-latest"
 
 
 def generate_docstring(function_signature: str,
